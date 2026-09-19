@@ -1,240 +1,127 @@
-/* eslint-disable */
+// Thin addon ingress. Content fetching, HLS rewriting and media authorization
+// belong to the configured addon, never to a second generic edge data plane.
+const VERSION = '1.0.0';
+const METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const REQUEST_HEADERS = new Set([
+  'accept', 'range', 'if-range', 'if-none-match', 'if-modified-since',
+  'x-cineharbor-download-intent',
+]);
+const RESPONSE_HEADERS = new Set([
+  'content-type', 'content-length', 'content-encoding', 'content-range',
+  'accept-ranges', 'etag', 'last-modified', 'content-disposition',
+]);
+const CONTENT_PATH = /^\/(?:manifest\.json|(?:catalog|meta|stream|subtitles)\/(?:movie|series|tv|channel)\/[^?#]+\.json|media\/(?:vod|live)\/(?:m3u8|segment|key))$/;
 
-addEventListener('fetch', (event) => {
-  event.respondWith(handleRequest(event.request));
-});
+export function readConfig(env = {}) {
+  const upstream = new URL(env.UPSTREAM_BASE_URL);
+  const host = upstream.hostname.toLowerCase().replace(/\.$/, '');
+  if (upstream.protocol !== 'https:' || !host || upstream.username ||
+      upstream.password || upstream.search || upstream.hash ||
+      /^[\d.]+$/.test(host) || host.includes(':') ||
+      /(^|\.)(localhost|local|internal|invalid)$/.test(host))
+    throw new Error('Invalid UPSTREAM_BASE_URL');
+  const origins = new Set();
+  for (const raw of String(env.ALLOWED_ORIGINS || '').split(',')) {
+    if (!raw.trim()) continue;
+    const origin = new URL(raw.trim());
+    if (!['http:', 'https:'].includes(origin.protocol) || origin.username ||
+        origin.password || origin.pathname !== '/' || origin.search || origin.hash)
+      throw new Error('Invalid ALLOWED_ORIGINS');
+    origins.add(origin.origin);
+  }
+  if (!origins.size) throw new Error('ALLOWED_ORIGINS must be explicit');
+  return { upstream, origins };
+}
 
-async function handleRequest(request) {
+function headersFor(origin) {
+  const headers = new Headers({
+    'Cache-Control': 'private, no-store',
+    'Vary': 'Origin',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
+  });
+  if (origin) {
+    headers.set('Access-Control-Allow-Origin', origin);
+    headers.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, ETag');
+  }
+  return headers;
+}
+
+function errorResponse(code, status, origin) {
+  const headers = headersFor(origin);
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  return new Response(JSON.stringify({ error: code }), { status, headers });
+}
+
+export async function handleRequest(request, env, fetchUpstream = fetch) {
+  let config;
+  try { config = readConfig(env); }
+  catch { return errorResponse('GATEWAY_NOT_CONFIGURED', 503); }
+  const url = new URL(request.url);
+  const origin = request.headers.get('origin');
+  if (origin && !config.origins.has(origin))
+    return errorResponse('ORIGIN_NOT_ALLOWED', 403);
+  if (!METHODS.has(request.method)) {
+    const response = errorResponse('METHOD_NOT_ALLOWED', 405, origin);
+    response.headers.set('Allow', 'GET, HEAD, OPTIONS');
+    return response;
+  }
+  if (url.pathname === '/' || url.pathname === '/healthz') {
+    const headers = headersFor(origin);
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    return new Response(request.method === 'HEAD' ? null : JSON.stringify({
+      service: 'cineharbor-addon-gateway', version: VERSION, configured: true,
+    }), { headers });
+  }
+  if (!CONTENT_PATH.test(url.pathname))
+    return errorResponse('CONTENT_ROUTE_NOT_FOUND', 404, origin);
+  if (request.method === 'OPTIONS') {
+    const method = request.headers.get('access-control-request-method');
+    const requested = (request.headers.get('access-control-request-headers') || '')
+      .split(',').map((name) => name.trim().toLowerCase()).filter(Boolean);
+    if (!origin || !['GET', 'HEAD'].includes(method) || requested.some((name) => !REQUEST_HEADERS.has(name)))
+      return errorResponse('PREFLIGHT_NOT_ALLOWED', 403, origin);
+    const headers = headersFor(origin);
+    headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    headers.set('Access-Control-Allow-Headers', [...REQUEST_HEADERS].join(', '));
+    headers.set('Vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+    return new Response(null, { status: 204, headers });
+  }
+  // Assignment to pathname cannot replace the administrator-selected origin.
+  // Never interpret a caller-supplied path or query as an upstream base URL.
+  const destination = new URL(config.upstream);
+  destination.pathname = config.upstream.pathname.replace(/\/$/, '') + url.pathname;
+  destination.search = url.search;
+  const requestHeaders = new Headers();
+  for (const [name, value] of request.headers)
+    if (REQUEST_HEADERS.has(name.toLowerCase())) requestHeaders.set(name, value);
   try {
-    const url = new URL(request.url);
-
-    // 如果访问根目录，返回HTML
-    if (url.pathname === '/') {
-      return new Response(getRootHtml(), {
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-        },
-      });
-    }
-
-    // 从请求路径中提取目标 URL
-    let actualUrlStr = decodeURIComponent(url.pathname.replace('/', ''));
-
-    // 判断用户输入的 URL 是否带有协议
-    actualUrlStr = ensureProtocol(actualUrlStr, url.protocol);
-
-    // 保留查询参数
-    actualUrlStr += url.search;
-
-    // 创建新 Headers 对象，排除以 'cf-' 开头的请求头
-    const newHeaders = filterHeaders(
-      request.headers,
-      (name) => !name.startsWith('cf-')
-    );
-
-    // 创建一个新的请求以访问目标 URL
-    const modifiedRequest = new Request(actualUrlStr, {
-      headers: newHeaders,
+    const response = await fetchUpstream(new Request(destination, {
       method: request.method,
-      body: request.body,
+      headers: requestHeaders,
       redirect: 'manual',
-    });
-
-    // 发起对目标 URL 的请求
-    const response = await fetch(modifiedRequest);
-    let body = response.body;
-
-    // 处理重定向
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      body = response.body;
-      // 创建新的 Response 对象以修改 Location 头部
-      return handleRedirect(response, body);
-    } else if (response.headers.get('Content-Type')?.includes('text/html')) {
-      body = await handleHtmlContent(
-        response,
-        url.protocol,
-        url.host,
-        actualUrlStr
-      );
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000),
+    }));
+    if (response.status >= 300 && response.status < 400 && response.status !== 304) {
+      await response.body?.cancel();
+      return errorResponse('UPSTREAM_REDIRECT_REJECTED', 502, origin);
     }
-
-    // 创建修改后的响应对象
-    const modifiedResponse = new Response(body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
-
-    // 添加禁用缓存的头部
-    setNoCacheHeaders(modifiedResponse.headers);
-
-    // 添加 CORS 头部，允许跨域访问
-    setCorsHeaders(modifiedResponse.headers);
-
-    return modifiedResponse;
+    if (response.status >= 500 || /(?:text\/html|image\/svg\+xml)/i.test(response.headers.get('content-type') || '')) {
+      await response.body?.cancel();
+      return errorResponse('INVALID_UPSTREAM_RESPONSE', 502, origin);
+    }
+    const headers = headersFor(origin);
+    for (const [name, value] of response.headers)
+      if (RESPONSE_HEADERS.has(name.toLowerCase())) headers.set(name, value);
+    const noBody = request.method === 'HEAD' || [204, 205, 304].includes(response.status);
+    if (noBody) await response.body?.cancel();
+    // Stream unchanged. The addon owns token checks, ranges and HLS rewriting.
+    return new Response(noBody ? null : response.body, { status: response.status, headers });
   } catch (error) {
-    // 如果请求目标地址时出现错误，返回带有错误消息的响应和状态码 500（服务器错误）
-    return jsonResponse(
-      {
-        error: error.message,
-      },
-      500
-    );
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    return errorResponse(timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE', timedOut ? 504 : 502, origin);
   }
 }
 
-// 确保 URL 带有协议
-function ensureProtocol(url, defaultProtocol) {
-  return url.startsWith('http://') || url.startsWith('https://')
-    ? url
-    : defaultProtocol + '//' + url;
-}
-
-// 处理重定向
-function handleRedirect(response, body) {
-  const location = new URL(response.headers.get('location'));
-  const modifiedLocation = `/${encodeURIComponent(location.toString())}`;
-  return new Response(body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: {
-      ...response.headers,
-      Location: modifiedLocation,
-    },
-  });
-}
-
-// 处理 HTML 内容中的相对路径
-async function handleHtmlContent(response, protocol, host, actualUrlStr) {
-  const originalText = await response.text();
-  const regex = new RegExp('((href|src|action)=["\'])/(?!/)', 'g');
-  let modifiedText = replaceRelativePaths(
-    originalText,
-    protocol,
-    host,
-    new URL(actualUrlStr).origin
-  );
-
-  return modifiedText;
-}
-
-// 替换 HTML 内容中的相对路径
-function replaceRelativePaths(text, protocol, host, origin) {
-  const regex = new RegExp('((href|src|action)=["\'])/(?!/)', 'g');
-  return text.replace(regex, `$1${protocol}//${host}/${origin}/`);
-}
-
-// 返回 JSON 格式的响应
-function jsonResponse(data, status) {
-  return new Response(JSON.stringify(data), {
-    status: status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-  });
-}
-
-// 过滤请求头
-function filterHeaders(headers, filterFunc) {
-  return new Headers([...headers].filter(([name]) => filterFunc(name)));
-}
-
-// 设置禁用缓存的头部
-function setNoCacheHeaders(headers) {
-  headers.set('Cache-Control', 'no-store');
-}
-
-// 设置 CORS 头部
-function setCorsHeaders(headers) {
-  headers.set('Access-Control-Allow-Origin', '*');
-  headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-  headers.set('Access-Control-Allow-Headers', '*');
-}
-
-// 返回根目录的 HTML
-function getRootHtml() {
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet">
-  <title>Proxy Everything</title>
-  <link rel="icon" type="image/png" href="https://img.icons8.com/color/1000/kawaii-bread-1.png">
-  <meta name="Description" content="Proxy Everything with CF Workers.">
-  <meta property="og:description" content="Proxy Everything with CF Workers.">
-  <meta property="og:image" content="https://img.icons8.com/color/1000/kawaii-bread-1.png">
-  <meta name="robots" content="index, follow">
-  <meta http-equiv="Content-Language" content="zh-CN">
-  <meta name="copyright" content="Copyright © ymyuuu">
-  <meta name="author" content="ymyuuu">
-  <link rel="apple-touch-icon-precomposed" sizes="120x120" href="https://img.icons8.com/color/1000/kawaii-bread-1.png">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
-  <style>
-      body, html {
-          height: 100%;
-          margin: 0;
-      }
-      .background {
-          background-image: url('https://imgapi.cn/bing.php');
-          background-size: cover;
-          background-position: center;
-          height: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-      }
-      .card {
-          background-color: rgba(255, 255, 255, 0.8);
-          transition: background-color 0.3s ease, box-shadow 0.3s ease;
-      }
-      .card:hover {
-          background-color: rgba(255, 255, 255, 1);
-          box-shadow: 0px 8px 16px rgba(0, 0, 0, 0.3);
-      }
-      .input-field input[type=text] {
-          color: #2c3e50;
-      }
-      .input-field input[type=text]:focus+label {
-          color: #2c3e50 !important;
-      }
-      .input-field input[type=text]:focus {
-          border-bottom: 1px solid #2c3e50 !important;
-          box-shadow: 0 1px 0 0 #2c3e50 !important;
-      }
-  </style>
-</head>
-<body>
-  <div class="background">
-      <div class="container">
-          <div class="row">
-              <div class="col s12 m8 offset-m2 l6 offset-l3">
-                  <div class="card">
-                      <div class="card-content">
-                          <span class="card-title center-align"><i class="material-icons left">link</i>Proxy Everything</span>
-                          <form id="urlForm" onsubmit="redirectToProxy(event)">
-                              <div class="input-field">
-                                  <input type="text" id="targetUrl" placeholder="在此输入目标地址" required>
-                                  <label for="targetUrl">目标地址</label>
-                              </div>
-                              <button type="submit" class="btn waves-effect waves-light teal darken-2 full-width">跳转</button>
-                          </form>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      </div>
-  </div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
-  <script>
-      function redirectToProxy(event) {
-          event.preventDefault();
-          const targetUrl = document.getElementById('targetUrl').value.trim();
-          const currentOrigin = window.location.origin;
-          window.open(currentOrigin + '/' + encodeURIComponent(targetUrl), '_blank');
-      }
-  </script>
-</body>
-</html>`;
-}
+export default { fetch: (request, env) => handleRequest(request, env) };

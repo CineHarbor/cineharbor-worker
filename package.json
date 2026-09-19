@@ -1,0 +1,16 @@
+{
+  "name": "cineharbor-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "CC-BY-NC-SA-4.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "check": "node --check proxy.worker.js",
+    "test": "node --test tests/*.test.mjs",
+    "build": "node scripts/build.mjs",
+    "dry-run": "wrangler deploy --dry-run --outdir dist/wrangler",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": { "wrangler": "4.135.0" }
+}

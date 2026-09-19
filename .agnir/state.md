@@ -1,8 +1,13 @@
 # cineharbor-worker Current State
 
-CineHarbor 边缘代理与浏览器下载 Service Worker。P6 阶段迁入并改名。
+Target: 1.0.0. **RELEASE_READY = false; PUBLIC_RELEASE_EXECUTED = false.**
 
-- `proxy.worker.js`：Cloudflare Workers 边缘代理（`addEventListener('fetch')`），根路径返回状态页，其余按路径转发。
-- `service-worker.ts`：浏览器端下载 Service Worker，把带 `x-cineharbor-download-intent` 的 vod 请求下沉为后台缓存下载（`cineharbor-vod-download-v1` 缓存、Range 支持）。
-- 许可证：CC BY-NC-SA 4.0。
-- Agnir 操作基线：`iorLab/agnir` 稳定发布 `v1.0.2`（revision `b5626394ec40a5cb7a28c01892acde07cc0adc8e`，distribution `agnir-agent-skill`）；Core/Profile 保持 `1.0` / `repository-filesystem/1.0`，2026-09-19 完成 compatible operational upgrade，canonical 激活路径为 `AGENTS.md → AGNIR.md → AGNIR.yaml`；既有 Project identity、lineage 与 durable memory 保持不变。
+This repository now owns an optional fixed-upstream addon gateway, not an arbitrary-target proxy or duplicate download worker. It accepts only read-only addon/media routes, explicit origins and allowlisted noncredential headers; rejects redirects and unsafe document responses; preserves byte ranges, auth failures and media payloads; and disables shared caching. Missing trusted configuration fails closed.
+
+The former unused browser Service Worker prototype is retired. The tracked seven-repository inventory found no production registration/import/build consumer; actual Web PWA and download/cache implementations remain in cineharbor-web and are unchanged. This is not a claim that unknown external deployments have been inspected.
+
+Local validation: syntax check, 13 dependency-free security/contract tests and source packaging passed. These use injected upstream responses and are not production or workerd evidence. The exact Wrangler 4.135.0 dependency graph is being materialized; lock publication, clean npm ci, Wrangler dry-run, two current-main CI passes and production smoke remain required.
+
+No deployment credentials or actual production route have been verified. Record availability only as booleans in CI; never export secret values. No deployment or public release has been performed by this checkpoint.
+
+Project identity urn:cineharbor:project:cineharbor-worker and lineage urn:cineharbor:lineage:cineharbor-worker remain unchanged. Agnir Core/Profile 1.0 / repository-filesystem/1.0, operations 1.0.2 at b5626394ec40a5cb7a28c01892acde07cc0adc8e. Initialization is committed, not pending. License CC-BY-NC-SA-4.0.

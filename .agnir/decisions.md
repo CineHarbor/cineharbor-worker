@@ -28,3 +28,9 @@
 - 分类：compatible operational upgrade；Core/Profile 仍为 `1.0` / `repository-filesystem/1.0`，保留 `project.identity`、`continuity.lineage`、memory locators/content、policy 与无关 Project 内容。
 - 激活 packaging：新增 canonical 根 `AGNIR.md`；`AGENTS.md` 改为直达 `AGNIR.md` 的 locator；README `## Agnir Project Instructions` 收敛为兼容 locator。
 - provenance：`AGNIR.yaml > extensions > agnir/operations` 更新为 release `1.0.2` / applied revision `b5626394ec40a5cb7a28c01892acde07cc0adc8e`。
+
+## 2026-09-19 — Retire unused duplicate Worker paths and close arbitrary proxy
+
+The previous arbitrary-target edge proxy could forward private caller credentials to arbitrary destinations. Replace it with a fail-closed, fixed-upstream, read-only addon gateway; addon fetching/media authorization remain in Rust remote addons under ADR-0006. CORS is not authentication and no new media authorization bypass is introduced.
+
+The unused browser download Service Worker prototype has no active consumer in the seven-repository source snapshot and is removed rather than added as a parallel Web implementation. Actual Web PWA/download code and persisted caches are preserved. This supersedes the 2026-08-31 prototype ownership description; it does not attest to unknown external deployments. Production deployment remains evidence-gated.

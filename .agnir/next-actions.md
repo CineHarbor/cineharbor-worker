@@ -1,6 +1,6 @@
 # cineharbor-worker Next Actions
 
-0. **提交并推送本次 Agnir 初始化**（`AGNIR.yaml` / `AGENTS.md` / `.agnir/` / README 段），当前均为未提交改动。
-
-1. `proxy.worker.js`：`wrangler deploy` 到 Cloudflare Workers；跨域/Range 按文件内注释调整。
-2. `service-worker.ts`：由 Web 应用构建管线（esbuild/wrangler）编译后注册到浏览器。
+1. Verify the published destination ref and fresh-resolve the declared identity/lineage. Retrieve the toolchain preparation artifact, commit package-lock.json and replace temporary materialization with mandatory clean npm ci/check/test/build/Wrangler dry-run CI.
+2. Verify two complete green runs on the same current main; add real workerd runtime smoke, not only injected-response tests.
+3. Resolve production account/route/upstream/origin configuration from existing authorized secret/config stores. Missing prerequisites are EXTERNAL_BLOCKER, never a successful deployment. Run actual production health/CORS/Range/HLS/auth smoke where deployed.
+4. Complete cross-repository security/architecture and 1.0.0 acceptance evidence. Do not publish a release or claim readiness while mandatory gates are unresolved.

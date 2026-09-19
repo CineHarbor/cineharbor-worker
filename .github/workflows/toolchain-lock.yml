@@ -1,0 +1,46 @@
+name: Materialize Worker toolchain lock
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/toolchain-lock.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lock:
+    name: Dependency preparation only, not release acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-fund --no-audit
+      - run: npm run check && npm test && npm run build && npm run dry-run
+      - name: Record nonsecret deployment prerequisites
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          UPSTREAM: ${{ vars.UPSTREAM_BASE_URL }}
+          ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+          ROUTE: ${{ vars.WORKER_ROUTE }}
+        run: |
+          node --input-type=module <<'JS'
+          import {writeFileSync} from 'node:fs';
+          const present = Object.fromEntries(['CF_TOKEN','CF_ACCOUNT','UPSTREAM','ORIGINS','ROUTE'].map(key => [key, Boolean(process.env[key])]));
+          writeFileSync('deployment-prerequisites.json', JSON.stringify({present, deployed:false}, null, 2));
+          JS
+      - name: Package exact build dependencies, never secrets or credentials
+        run: tar -czf worker-node-modules.tar.gz node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-toolchain-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            package-lock.json
+            worker-node-modules.tar.gz
+            deployment-prerequisites.json
+          retention-days: 2
+          if-no-files-found: error
