@@ -1,46 +1,71 @@
-name: Materialize Worker toolchain lock
+name: Publish verified initial Worker lock
 on:
   push:
     branches: [main]
     paths: ['.github/workflows/toolchain-lock.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
+  actions: write
+concurrency:
+  group: initial-worker-lock
+  cancel-in-progress: false
+env:
+  WRANGLER_SEND_METRICS: 'false'
 jobs:
   lock:
-    name: Dependency preparation only, not release acceptance
+    name: Publish only the verified dependency lock and checkpoint
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      - run: npm install --ignore-scripts --no-fund --no-audit
-      - run: npm run check && npm test && npm run build && npm run dry-run
-      - name: Record nonsecret deployment prerequisites
+      - name: Import the immutable previously validated toolchain artifact
         env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          UPSTREAM: ${{ vars.UPSTREAM_BASE_URL }}
-          ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
-          ROUTE: ${{ vars.WORKER_ROUTE }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          test ! -f package-lock.json
+          gh api repos/CineHarbor/cineharbor-worker/actions/artifacts/10578304757/zip > "$RUNNER_TEMP/worker-toolchain.zip"
+          unzip -p "$RUNNER_TEMP/worker-toolchain.zip" package-lock.json > package-lock.json
+          echo 'f0c4f1f6a7bbb22868fc517afcf8e78c1d9f26af0a88e450e39c9d3c7b1fdb53  package-lock.json' | sha256sum -c -
           node --input-type=module <<'JS'
-          import {writeFileSync} from 'node:fs';
-          const present = Object.fromEntries(['CF_TOKEN','CF_ACCOUNT','UPSTREAM','ORIGINS','ROUTE'].map(key => [key, Boolean(process.env[key])]));
-          writeFileSync('deployment-prerequisites.json', JSON.stringify({present, deployed:false}, null, 2));
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const lock=JSON.parse(readFileSync('package-lock.json'));
+          const pkg=JSON.parse(readFileSync('package.json'));
+          for(const [name,version] of Object.entries(pkg.devDependencies)) {
+            if(lock.packages['node_modules/'+name]?.version!==version) throw new Error('Unexpected locked package '+name);
+          }
+          lock.packages[''].devDependencies=pkg.devDependencies;
+          writeFileSync('package-lock.json',JSON.stringify(lock,null,2)+'\n');
           JS
-      - name: Package exact build dependencies, never secrets or credentials
-        run: tar -czf worker-node-modules.tar.gz node_modules
-      - uses: actions/upload-artifact@v4
-        with:
-          name: worker-toolchain-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            package-lock.json
-            worker-node-modules.tar.gz
-            deployment-prerequisites.json
-          retention-days: 2
-          if-no-files-found: error
+      - run: npm ci --ignore-scripts --no-fund --no-audit
+      - run: npm run check && npm test && npm run test:runtime && npm run build && npm run dry-run
+      - name: Checkpoint and non-force publish only the verified lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA" || { echo AGNIR_CHECKPOINT_CONFLICT; exit 1; }
+          node --input-type=module <<'JS'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          import {createHash} from 'node:crypto';
+          const sha=createHash('sha256').update(readFileSync('package-lock.json')).digest('hex');
+          writeFileSync('.agnir/evidence/2026-09-19-worker-locked-toolchain.md', '# Locked Worker toolchain checkpoint\n\nImported the initial lock from immutable artifact 10578304757 after SHA256 verification. Declared the same already-locked Miniflare version as a direct test dependency. No dependency graph was silently floated.\n\nClean npm ci, syntax, all security unit tests, real workerd runtime test, source build and Wrangler dry-run passed on this candidate. This is not production deployment or final main CI acceptance.\n\nLock SHA256: '+sha+'\n\nSame Project identity/lineage and Agnir compatibility/provenance. RELEASE_READY remains false. Cloudflare credentials, route and origin/upstream configuration were absent in the earlier prerequisite check. No secrets or public release. Destination verification and fresh resolution are performed after push; the temporary lock publisher must then be retired.\n');
+          const state=readFileSync('.agnir/state.md','utf8');
+          writeFileSync('.agnir/state.md',state+'\n## Locked runtime checkpoint\n\nThe exact verified Wrangler/Miniflare dependency lock is now committed. Clean npm ci, security tests, actual workerd runtime and Wrangler dry-run passed before this checkpoint. Prior dependency materialization is complete. Two current-main quality runs and retirement of the temporary publisher remain pending. Production prerequisites were absent, so deployment is EXTERNAL_BLOCKER, not a pass.\n');
+          writeFileSync('.agnir/next-actions.md','# cineharbor-worker Next Actions\n\n1. Verify two complete current-main ci runs, then remove the completed temporary lock publisher. Retain npm ci, security contracts, real workerd, build, Wrangler dry-run and audit gates.\n2. Resolve EXTERNAL_BLOCKER: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, UPSTREAM_BASE_URL, ALLOWED_ORIGINS and WORKER_ROUTE were all absent in the verified prerequisite check. Configure through approved stores, deploy and perform actual production health/CORS/Range/HLS/auth smoke.\n3. Complete cross-repository 1.0.0 acceptance evidence. Do not publish or claim release readiness while mandatory gates remain unresolved.\n');
+          JS
+          git add package-lock.json .agnir/evidence/2026-09-19-worker-locked-toolchain.md .agnir/state.md .agnir/next-actions.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'build(worker): checkpoint verified exact Wrangler and runtime lock'
+          git push origin HEAD:main
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$(git rev-parse HEAD)"
+          gh api "repos/$GITHUB_REPOSITORY/contents/AGNIR.yaml?ref=main" --jq '.content' | base64 --decode > "$RUNNER_TEMP/AGNIR.yaml"
+          grep -q 'urn:cineharbor:project:cineharbor-worker' "$RUNNER_TEMP/AGNIR.yaml"
+          grep -q 'urn:cineharbor:lineage:cineharbor-worker' "$RUNNER_TEMP/AGNIR.yaml"
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main

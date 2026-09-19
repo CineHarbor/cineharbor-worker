@@ -1,0 +1,62 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  WRANGLER_SEND_METRICS: 'false'
+jobs:
+  quality:
+    name: Locked install, security contracts, workerd and deploy dry-run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-fund --no-audit
+      - run: npm run check
+      - run: npm test
+      - run: npm run test:runtime
+      - run: npm run build
+      - run: npm run dry-run
+      - run: npm audit --audit-level=high
+      - run: git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/
+            wrangler.json
+          if-no-files-found: error
+          retention-days: 14
+  repeat_verified_main:
+    name: Repeat successful main verification once
+    needs: quality
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$current" != "$GITHUB_SHA" ]; then
+            echo 'Newer main owns its second verification.'
+            exit 0
+          fi
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
