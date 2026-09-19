@@ -1,6 +1,5 @@
 # cineharbor-worker Next Actions
 
-1. Verify the published destination ref and fresh-resolve the declared identity/lineage. Retrieve the toolchain preparation artifact, commit package-lock.json and replace temporary materialization with mandatory clean npm ci/check/test/build/Wrangler dry-run CI.
-2. Verify two complete green runs on the same current main; add real workerd runtime smoke, not only injected-response tests.
-3. Resolve production account/route/upstream/origin configuration from existing authorized secret/config stores. Missing prerequisites are EXTERNAL_BLOCKER, never a successful deployment. Run actual production health/CORS/Range/HLS/auth smoke where deployed.
-4. Complete cross-repository security/architecture and 1.0.0 acceptance evidence. Do not publish a release or claim readiness while mandatory gates are unresolved.
+1. Verify two complete current-main ci runs, then remove the completed temporary lock publisher. Retain npm ci, security contracts, real workerd, build, Wrangler dry-run and audit gates.
+2. Resolve EXTERNAL_BLOCKER: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, UPSTREAM_BASE_URL, ALLOWED_ORIGINS and WORKER_ROUTE were all absent in the verified prerequisite check. Configure through approved stores, deploy and perform actual production health/CORS/Range/HLS/auth smoke.
+3. Complete cross-repository 1.0.0 acceptance evidence. Do not publish or claim release readiness while mandatory gates remain unresolved.

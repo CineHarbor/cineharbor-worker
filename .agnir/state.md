@@ -11,3 +11,7 @@ Local validation: syntax check, 13 dependency-free security/contract tests and s
 No deployment credentials or actual production route have been verified. Record availability only as booleans in CI; never export secret values. No deployment or public release has been performed by this checkpoint.
 
 Project identity urn:cineharbor:project:cineharbor-worker and lineage urn:cineharbor:lineage:cineharbor-worker remain unchanged. Agnir Core/Profile 1.0 / repository-filesystem/1.0, operations 1.0.2 at b5626394ec40a5cb7a28c01892acde07cc0adc8e. Initialization is committed, not pending. License CC-BY-NC-SA-4.0.
+
+## Locked runtime checkpoint
+
+The exact verified Wrangler/Miniflare dependency lock is now committed. Clean npm ci, security tests, actual workerd runtime and Wrangler dry-run passed before this checkpoint. Prior dependency materialization is complete. Two current-main quality runs and retirement of the temporary publisher remain pending. Production prerequisites were absent, so deployment is EXTERNAL_BLOCKER, not a pass.
