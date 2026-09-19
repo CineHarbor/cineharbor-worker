@@ -1,19 +1,25 @@
 # cineharbor-worker Current State
 
-Target: 1.0.0. **RELEASE_READY = false; PUBLIC_RELEASE_EXECUTED = false.**
+Target: CineHarbor **1.0.0 public release**. **RELEASE_READY = false; PUBLIC_RELEASE_EXECUTED = false.**
 
-This repository owns an optional fixed-upstream addon gateway, not an arbitrary-target proxy or duplicate download worker. It accepts only read-only addon/media routes, explicit origins and allowlisted noncredential headers; rejects redirects and unsafe document responses; preserves byte ranges, auth failures and media payloads; and disables shared caching. Missing trusted configuration fails closed.
+This repository owns an optional fixed-upstream addon gateway, not an arbitrary-target proxy or duplicate download worker. The package is already version `1.0.0`. The gateway accepts only read-only addon/media routes, explicit origins and allowlisted noncredential headers; rejects redirects and unsafe document responses; preserves byte ranges/auth failures/media payloads; and disables shared caching. Missing trusted configuration fails closed.
 
-The unused browser Service Worker prototype is retired. The tracked seven-repository inventory found no production registration/import/build consumer; actual Web PWA and download/cache implementations remain in cineharbor-web. Unknown external deployments have not been certified.
+## Final code verification
 
-## Observed verification and cleanup — 2026-09-19
+Main predecessor `0b544597f87068ba43519e5ab67e58d705208ee0` passed two complete CI runs: push `35436775571` and workflow-dispatch `35436789834`. Locked install, syntax, 13 security contracts, real workerd, build, Wrangler dry-run, dependency audit and clean-tree gates passed.
 
-The exact Wrangler/Miniflare lock is committed. At main `0d2a383673e3b53f44f8f2626671e7a733fd4b05`, two distinct Actions runs `35426573655` and `35426574616` passed. Their actual job steps were inspected: locked install, syntax, security tests, real workerd, build, Wrangler dry-run, dependency audit and clean-tree check all succeeded. Only the dispatch-only repeat helper was intentionally skipped; no required quality step was skipped.
+## 1.0 consumer audit — 2026-09-19
 
-The completed one-time `toolchain-lock.yml` publisher is now removed. It previously held contents/actions write permission and would fail after the initial lock existed. Routine CI remains read-only except for its narrowly scoped repeat-dispatch job. The cleanup revision must obtain its own CI results; predecessor passes are not final-revision acceptance.
+The 1.0 facade scope requires **used** Worker capabilities, not deployment of every optional repository.
 
-Local revalidation of the unchanged gateway: Node v22.16.0 syntax, 13/13 contract tests with zero skips and source build passed. These local fixture tests are not production deployment evidence.
+A cross-repository consumer audit found no production reference to `cineharbor-addon-gateway`, `WORKER_ROUTE`, Worker `UPSTREAM_BASE_URL`, or the `cineharbor-worker` repository from the facade, Web, Desktop, Core, Addon SDK or Download Site. Their immutable integration graphs also exclude Worker: Web pins Core+Addon SDK; Desktop pins Core+Addon SDK+Web; Download Site consumes public Desktop release data.
 
-Production prerequisites were recorded absent in the prior check: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, UPSTREAM_BASE_URL, ALLOWED_ORIGINS and WORKER_ROUTE. No subsequent production deployment has been observed. Production deployment and smoke remain EXTERNAL_BLOCKER, not a pass.
+The browser PWA Service Worker is Web-owned and unrelated to this Cloudflare gateway.
 
-Project identity `urn:cineharbor:project:cineharbor-worker`, lineage `urn:cineharbor:lineage:cineharbor-worker`, Agnir Core/Profile 1.0 / repository-filesystem/1.0 and operations 1.0.2 at `b5626394ec40a5cb7a28c01892acde07cc0adc8e` are unchanged. License: CC-BY-NC-SA-4.0.
+Therefore Cloudflare credentials and a production Worker route are **not a 1.0 release prerequisite while this optional gateway has no production consumer**. The prior missing-credential observation remains true, but is reclassified from release blocker to disabled optional deployment. If a production consumer is introduced before release, this classification becomes invalid and real deployment/smoke becomes mandatory.
+
+See `.agnir/evidence/2026-09-19-unused-gateway-consumer-audit.md`.
+
+This docs/checkpoint revision requires its own two main CI runs after merge; code behavior is unchanged.
+
+Project identity `urn:cineharbor:project:cineharbor-worker`, lineage `urn:cineharbor:lineage:cineharbor-worker`, Agnir Core/Profile 1.0 / repository-filesystem/1.0 and operations 1.0.2 remain unchanged. License: CC-BY-NC-SA-4.0.
